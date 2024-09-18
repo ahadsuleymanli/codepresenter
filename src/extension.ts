@@ -22,14 +22,11 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 function listAllTabs() {
-    // Get all open text documents in the workspace
-    const allDocuments = vscode.workspace.textDocuments;
-    
-    // Get the active editors
-    const activeEditors = vscode.window.visibleTextEditors;
+    const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
 
-    // Create a list of tab names from the documents
-    const tabNames = allDocuments.map(doc => doc.fileName);
+    const tabNames = allTabs
+        .map(tab => (tab.input as vscode.TextDocument).uri?.fsPath)
+        .filter(fileName => fileName);  // Filter out non-file tabs
 
     if (tabNames.length === 0) {
         vscode.window.showInformationMessage('No open tabs.');
@@ -39,33 +36,38 @@ function listAllTabs() {
 }
 
 async function promptAndSwitchToTab() {
-    const tabNames = getAllTabNames();
-    
+    // Reuse the listAllTabs logic to get all tabs
+    const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
+    const tabNames = allTabs
+        .map(tab => (tab.input as vscode.TextDocument).uri?.fsPath)
+        .filter(fileName => fileName);  // Filter out non-file tabs
+
     if (tabNames.length === 0) {
         vscode.window.showInformationMessage('No open tabs to switch to.');
         return;
     }
 
+    // Show the QuickPick dialog for selecting a tab
     const selectedTab = await vscode.window.showQuickPick(tabNames, {
         placeHolder: 'Select a tab to switch to'
     });
 
     if (selectedTab) {
-        switchToTab(selectedTab);
+        await switchToTab(selectedTab);
     }
 }
 
-function getAllTabNames(): string[] {
-    const allDocuments = vscode.workspace.textDocuments;
-    return allDocuments.map(doc => doc.fileName);
-}
+async function switchToTab(tabName: string) {
+    // Use tabGroups to get all open tabs, even those not currently visible
+    const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
 
-function switchToTab(tabName: string) {
-    const editors = vscode.window.visibleTextEditors;
+    for (const tab of allTabs) {
+        const document = (tab.input as vscode.TextDocument).uri?.fsPath;
 
-    for (const editor of editors) {
-        if (editor.document.fileName === tabName) {
-            vscode.window.showTextDocument(editor.document);
+        // Check if the tab matches the selected tab name
+        if (document === tabName) {
+            // Open the document in the editor
+            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(document));
             vscode.window.showInformationMessage(`Switched to tab: ${tabName}`);
             return;
         }
