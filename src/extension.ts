@@ -22,13 +22,19 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 function listAllTabs() {
-    const editors = vscode.window.visibleTextEditors;
-    const tabNames = editors.map(editor => editor.document.fileName);
+    // Get all open text documents in the workspace
+    const allDocuments = vscode.workspace.textDocuments;
+    
+    // Get the active editors
+    const activeEditors = vscode.window.visibleTextEditors;
+
+    // Create a list of tab names from the documents
+    const tabNames = allDocuments.map(doc => doc.fileName);
 
     if (tabNames.length === 0) {
         vscode.window.showInformationMessage('No open tabs.');
     } else {
-        vscode.window.showInformationMessage('Open Tabs:\n' + tabNames.join('\n'));
+        vscode.window.showInformationMessage('All Open Tabs:\n' + tabNames.join('\n'));
     }
 }
 
@@ -50,8 +56,8 @@ async function promptAndSwitchToTab() {
 }
 
 function getAllTabNames(): string[] {
-    const editors = vscode.window.visibleTextEditors;
-    return editors.map(editor => editor.document.fileName);
+    const allDocuments = vscode.workspace.textDocuments;
+    return allDocuments.map(doc => doc.fileName);
 }
 
 function switchToTab(tabName: string) {
@@ -67,7 +73,6 @@ function switchToTab(tabName: string) {
 
     vscode.window.showWarningMessage(`Tab not found: ${tabName}`);
 }
-
 
 
 // This method is called when your extension is deactivated
