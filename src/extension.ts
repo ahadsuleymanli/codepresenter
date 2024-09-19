@@ -20,8 +20,33 @@ export function activate(context: vscode.ExtensionContext) {
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message.command === 'generateSlides') {
-                const tabContents = await getOpenTabsContexts();  // Get the actual open tabs' content
-                await generateSlides(tabContents, "", message.windowSize, message.textSize, panel);
+                const tabContents = await getOpenTabsContexts();
+                const slides = await generateSlides(tabContents, "", message.windowSize, message.textSize, panel);
+                panel.webview.postMessage({ command: 'displaySlides', slides });
+            }
+        
+            if (message.command === 'switchTab') {
+                const tabNames = message.tabName.split('-');  // Handle multiple tabs
+        
+                if (tabNames.length > 1) {
+                    // Open two tabs in split view
+                    const [firstTab, secondTab] = tabNames;
+                    const doc1 = await vscode.workspace.openTextDocument(vscode.Uri.file(firstTab));
+                    const doc2 = await vscode.workspace.openTextDocument(vscode.Uri.file(secondTab));
+        
+                    await vscode.window.showTextDocument(doc1, vscode.ViewColumn.One);
+                    await vscode.window.showTextDocument(doc2, vscode.ViewColumn.Beside);
+                } else {
+                    // Open a single tab
+                    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(tabNames[0]));
+                    await vscode.window.showTextDocument(doc);
+                }
+            }
+
+            if (message.command === 'customRequest') {
+                const tabContents = await getOpenTabsContexts();
+                const slides = await generateSlides(tabContents, "", message.windowSize, message.textSize, panel);
+                panel.webview.postMessage({ command: 'displaySlides', slides });
             }
         });
 
@@ -33,7 +58,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 async function loadThumbnails(panel: vscode.WebviewPanel) {
     // Simulate loading thumbnails (for future implementation)
-    // Here, you could add a request to fetch pre-generated thumbnails or handle them client-side.
     panel.webview.postMessage({ command: 'loadThumbnails', thumbnails: [] });
 }
 
@@ -41,58 +65,77 @@ function getWebviewContent() {
     return `
         <!DOCTYPE html>
         <html lang="en">
+        <head>
+            <style>
+                body {
+                    display: flex;
+                    flex-direction: column;
+                    height: 100vh;
+                    margin: 0;
+                }
+                #slides {
+                    flex: 1;
+                    overflow-y: auto;
+                }
+                #customRequestContainer {
+                    display: flex;
+                    padding: 10px;
+                    border-top: 1px solid #ccc;
+                }
+                #customRequestInput {
+                    flex: 1;
+                    padding: 5px;
+                    margin-right: 10px;
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                }
+                #submitButton {
+                    padding: 5px 10px;
+                    border: none;
+                    border-radius: 4px;
+                    background-color: #007acc;
+                    color: white;
+                    cursor: pointer;
+                }
+                #submitButton:hover {
+                    background-color: #005999;
+                }
+                #submitButton:before {
+                    content: '\u2191';  /* uparrow emoji as icon */
+                    margin-right: 5px;
+                }
+            </style>
+        </head>
         <body>
-            <h1>Code Presenter</h1>
-            <div id="thumbnails" style="display: flex; flex-wrap: wrap;"></div>
-            <button id="generateSlides">Generate Slides</button>
-
-            <div id="slides" style="margin-top: 20px;"></div>
-
+            <div id="slides"></div>
+            <div id="customRequestContainer">
+                <input type="text" id="customRequestInput" placeholder="Enter your request here..." value="Generate presentation from all open tabs" />
+                <button id="submitButton">Submit</button>
+            </div>
             <script>
                 const vscode = acquireVsCodeApi();
 
-                document.getElementById('generateSlides').onclick = () => {
+                document.getElementById('submitButton').onclick = () => {
+                    const input = document.getElementById('customRequestInput');
                     const windowSize = [window.innerWidth, window.innerHeight]; // Use actual window size
                     const textSize = 14; // Example text size, replace as needed
 
-                    // Send message to VSCode extension backend to generate slides
-                    vscode.postMessage({ command: 'generateSlides', windowSize, textSize });
+                    // Send custom request to VSCode extension backend
+                    vscode.postMessage({ command: 'customRequest', windowSize, textSize });
                 };
 
-                // Listen for messages from the extension (for both thumbnails and slides)
                 window.addEventListener('message', event => {
                     const message = event.data;
-
-                    if (message.command === 'loadThumbnails') {
-                        const thumbnailsDiv = document.getElementById('thumbnails');
-                        thumbnailsDiv.innerHTML = '';  // Clear existing content
-
-                        // Loop through thumbnails and add them
-                        message.thumbnails.forEach(thumbnail => {
-                            const img = document.createElement('img');
-                            img.src = thumbnail.image; // Assuming image is the data URL or file path
-                            img.alt = thumbnail.name;
-                            img.style = 'width: 150px; height: 100px; margin: 10px; cursor: pointer;';
-                            img.onclick = () => {
-                                // Switch tab when clicking the thumbnail
-                                vscode.postMessage({ command: 'switchTab', tabName: thumbnail.name });
-                            };
-                            thumbnailsDiv.appendChild(img);
-                        });
-                    }
 
                     if (message.command === 'displaySlides') {
                         const slidesDiv = document.getElementById('slides');
                         slidesDiv.innerHTML = '';  // Clear existing slides content
 
-                        // Loop through the received slides and display them
+                        // Handle the display of the slides
                         message.slides.forEach(slide => {
-                            const slideDiv = document.createElement('div');
-                            slideDiv.innerHTML = \`
-                                <h3>Slide with Tabs: \${slide.tab_names.join(', ')}</h3>
-                                <p>Code Sections: \${slide.tab_code_sections.map(section => section.join('-')).join(', ')}</p>
-                            \`;
-                            slidesDiv.appendChild(slideDiv);
+                            const div = document.createElement('div');
+                            div.innerHTML = slide.image;  // Display the HTML content
+                            slidesDiv.appendChild(div);
                         });
                     }
                 });
