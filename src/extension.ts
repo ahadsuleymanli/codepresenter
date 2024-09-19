@@ -6,29 +6,32 @@ const AZURE_OPENAI_API_KEY = process.env.AZURE_OPENAI_API_KEY  ?? "";
 
 const MAX_SPLITVIEW_TABS = 2;
 
-
 if (!AZURE_OPENAI_API_KEY) {
-	console.error('Environment variable AZURE_OPENAI_API_KEY is not defined.');
+    console.error('Environment variable AZURE_OPENAI_API_KEY is not defined.');
 }
 if (!OPENAI_API_ENDPOINT) {
-	console.error('Environment variable OPENAI_API_ENDPOINT is not defined.');
+    console.error('Environment variable OPENAI_API_ENDPOINT is not defined.');
+}
+
+interface CodeSection{
+	section_signature: string;
+	span: { start: number; end: number };
+}
+
+interface TabContext {
+	name: string;
+	full_code?: string;
+	code_sections: CodeSection[];
 }
 
 interface TabContents {
     [key: string]: string;
 }
 
-// interface SlideRequest {
-//     tab_contents: TabContents;
-//     window_size: [number, number];
-//     text_size: number;
-//     lines_that_fit: number;
-//     prompt: string;
-// }
-
 interface Slide {
     tab_names: string[];
     tab_code_sections: [number, number][];
+	slide_talking_points: string[]
 }
 
 interface Response {
@@ -38,9 +41,7 @@ interface Response {
 interface OpenAIChoice {
     message: {
         role: string;
-        content: {
-            slides: Slide[];
-        };
+        content: string;
     };
 }
 
@@ -64,7 +65,8 @@ export function activate(context: vscode.ExtensionContext) {
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message.command === 'generateSlides') {
-                await generateSlides(message.tabContents, message.windowSize, message.textSize, panel);
+                const tabContents = await getOpenTabsContents();  // Get the actual open tabs' content
+                await generateSlides(tabContents, message.windowSize, message.textSize, panel);
             }
         });
 
@@ -77,26 +79,30 @@ export function activate(context: vscode.ExtensionContext) {
 async function generateSlides(tabContents: TabContents, windowSize: [number, number], textSize: number, panel: vscode.WebviewPanel) {
     const linesThatFit = Math.floor(windowSize[1] / textSize);  // Calculate lines that fit in the window
 
-	const systemPrompt = `
-		Create a presentation based on the following:
-		- Relevant tabs: ${JSON.stringify(tabContents)}
-		- Max lines per window: ${linesThatFit}
-		- Select code sections and tabs to fit, using split view if needed, with up to ${MAX_SPLITVIEW_TABS} tabs per slide.
-		
-		The response model to return:
+    const systemPrompt = `
+        Create a presentation based on the following:
+        - Relevant tabs: ${JSON.stringify(tabContents)}
+        - Max lines per window: ${linesThatFit}
+        - Select code sections for each tab you recommend for the presentation by creating a slide object, naming one or two tabs to show in split view and denote code sections by providing starting and endling line numbers on the code.
+		- Add if it would help any talking points slide_talking_points to each slide 
+        - Create as many or little slide objects as necessary to show off parts of code and in the order of your chosing
+        
+        The response model to return:
 
 		interface Slide {
 			tab_names: string[];
 			tab_code_sections: [number, number][];
+			slide_talking_points: string[]
 		}
 
 		interface Response {
 			slides: Slide[];
 		}
-	`;
-	const userPrompt = "Create a presentation based on the provided code.";
+    `;
 
-	const requestBody = {
+    const userPrompt = "Create a presentation based on the provided code.";
+
+    const requestBody = {
         messages: [
             {
                 role: 'system',
@@ -113,7 +119,7 @@ async function generateSlides(tabContents: TabContents, windowSize: [number, num
     };
 
 
-	try {
+    try {
         // Send request to the OpenAI endpoint
         const response = await fetch(OPENAI_API_ENDPOINT, {
             method: 'POST',
@@ -125,17 +131,19 @@ async function generateSlides(tabContents: TabContents, windowSize: [number, num
         });
 
         // Parse response
-		const data = await response.json();
-		console.log(data);
+        const data = await response.json();
+        console.log(data);
         vscode.window.showInformationMessage(`OpenAI response:\n ${JSON.stringify(data)}`);
 
         const openAIResponse = data as OpenAIResponse;
-        const slides = openAIResponse.choices[0]?.message?.content.slides || [];
+		const content = openAIResponse.choices[0]?.message?.content;
+        const slides = parseAIResponse(content) || [];
+		console.log("---- slides:");
+        console.log(slides);
 
         vscode.window.showInformationMessage(`Generated ${slides.length} slides.`);
 
-
-		panel.webview.postMessage({
+        panel.webview.postMessage({
             command: 'displaySlides',
             slides
         });
@@ -143,6 +151,90 @@ async function generateSlides(tabContents: TabContents, windowSize: [number, num
     } catch (error) {
         vscode.window.showErrorMessage('Failed to generate slides: ' + (error as Error)?.message ?? error);
     }
+}
+
+function parseAIResponse(aiResponse: string): Slide[] {
+    try {
+        // Attempt to extract JSON from the AI response
+        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/); // Matches the first JSON-like structure in the response
+        
+        if (!jsonMatch) {
+            throw new Error('No JSON structure found in AI response.');
+        }
+
+        const jsonResponse = jsonMatch[0];
+
+        // Attempt to parse the JSON
+        let parsedResponse: any;
+        try {
+            parsedResponse = JSON.parse(jsonResponse);
+        } catch (e) {
+            throw new Error('Failed to parse JSON from AI response.');
+        }
+
+        // Validate the structure against the Response interface
+        if (!isValidResponse(parsedResponse)) {
+            throw new Error('Invalid JSON structure in AI response.');
+        }
+
+        // Return the slides array
+        return parsedResponse.slides;
+    } catch (error) {
+        if (error instanceof Error) {
+            vscode.window.showErrorMessage('Failed to parse AI response: ' + error.message);
+        } else {
+            vscode.window.showErrorMessage('Failed to parse AI response due to an unknown error.');
+        }
+
+        // In case of error, return an empty array as fallback
+        return [];
+    }
+}
+
+// Type guard to check if the parsed object matches the Response interface
+function isValidResponse(response: any): response is Response {
+    return (
+        Array.isArray(response.slides) && 
+        response.slides.every(isValidSlide)
+    );
+}
+
+// Type guard to check if each slide matches the Slide interface
+function isValidSlide(slide: any): slide is Slide {
+    return (
+        Array.isArray(slide.tab_names) &&
+        slide.tab_names.every((name: any) => typeof name === 'string') &&
+        Array.isArray(slide.tab_code_sections) &&
+        slide.tab_code_sections.every(
+            (section: any) => 
+                Array.isArray(section) &&
+                section.length === 2 &&
+                typeof section[0] === 'number' &&
+                typeof section[1] === 'number'
+        )
+    );
+}
+
+
+// Function to collect the content of all open tabs
+async function getOpenTabsContents(): Promise<TabContents> {
+    const tabContents: TabContents = {};
+
+    // Loop through all open text documents in the workspace
+    vscode.workspace.textDocuments.forEach(document => {
+
+        // Exclude webview tabs like "CodePresenter"
+        if (document.uri.scheme === 'vscode-webview') {
+            return;  // Skip webview tabs
+        }
+        const tabName = document.fileName;  // Get the file name of the tab
+        const content = document.getText();  // Get the content of the tab
+        tabContents[tabName] = content;  // Store the content in the tabContents object
+    });
+
+	console.log(tabContents);
+
+    return tabContents;
 }
 
 async function loadThumbnails(panel: vscode.WebviewPanel) {
@@ -166,13 +258,11 @@ function getWebviewContent() {
                 const vscode = acquireVsCodeApi();
 
                 document.getElementById('generateSlides').onclick = () => {
-                    // Example tabContents: dynamically fetch actual open tab contents from VSCode
-                    const tabContents = { "tab1": "code for tab 1", "tab2": "code for tab 2" }; 
                     const windowSize = [window.innerWidth, window.innerHeight]; // Use actual window size
                     const textSize = 14; // Example text size, replace as needed
 
                     // Send message to VSCode extension backend to generate slides
-                    vscode.postMessage({ command: 'generateSlides', tabContents, windowSize, textSize });
+                    vscode.postMessage({ command: 'generateSlides', windowSize, textSize });
                 };
 
                 // Listen for messages from the extension (for both thumbnails and slides)
