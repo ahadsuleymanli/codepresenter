@@ -1,81 +1,115 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import axios from 'axios';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-    // Register the "listTabs" command
-    const listTabsCommand = vscode.commands.registerCommand('codepresenter.listTabs', () => {
-        listAllTabs();
+    const disposable = vscode.commands.registerCommand('codepresenter.showUI', async () => {
+        const panel = vscode.window.createWebviewPanel(
+            'codePresenter',
+            'Code Presenter',
+            vscode.ViewColumn.Beside,  // Open in a new editor column
+            {
+                enableScripts: true,
+            }
+        );
+
+        panel.webview.html = getWebviewContent();
+
+        panel.webview.onDidReceiveMessage(async (message) => {
+            if (message.command === 'generateSlides') {
+                await generateSlides(message.tabContents, message.windowSize, message.textSize);
+            }
+        });
+
+        // Initial load of thumbnails when the webview is opened
+        loadThumbnails(panel);
     });
 
-    const switchToTabCommand = vscode.commands.registerCommand('codepresenter.switchToTab', async () => {
-        await promptAndSwitchToTab();
-    });
-
-
-    // Add the commands to the extension context
-    context.subscriptions.push(listTabsCommand);
-    context.subscriptions.push(switchToTabCommand);
+    context.subscriptions.push(disposable);
 }
 
-function listAllTabs() {
-    const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
+async function generateSlides(tabContents: Record<string, string>, windowSize: [number, number], textSize: number) {
+    const linesThatFit = Math.floor(windowSize[1] / textSize);  // Calculate lines that fit in the window
 
-    const tabNames = allTabs
-        .map(tab => (tab.input as vscode.TextDocument).uri?.fsPath)
-        .filter(fileName => fileName);  // Filter out non-file tabs
+    const requestBody = {
+        tab_contents: tabContents,
+        window_size: windowSize,
+        text_size: textSize,
+        lines_that_fit: linesThatFit,
+        prompt: "Create a presentation based on the provided code."
+    };
 
-    if (tabNames.length === 0) {
-        vscode.window.showInformationMessage('No open tabs.');
-    } else {
-        vscode.window.showInformationMessage('All Open Tabs:\n' + tabNames.join('\n'));
+    try {
+        const response = await axios.post('http://localhost:8000/generateslides', requestBody);
+        const slides = response.data.slides;
+        
+        // Handle the slides (e.g., display them in the webview)
+        vscode.window.showInformationMessage(`Generated ${slides.length} slides.`);
+        // Further processing can be added here
+    } catch (error) {
+        vscode.window.showErrorMessage('Failed to generate slides.');
     }
 }
 
-async function promptAndSwitchToTab() {
-    // Reuse the listAllTabs logic to get all tabs
-    const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
-    const tabNames = allTabs
-        .map(tab => (tab.input as vscode.TextDocument).uri?.fsPath)
-        .filter(fileName => fileName);  // Filter out non-file tabs
+async function loadThumbnails(panel: vscode.WebviewPanel) {
+    try {
+        const response = await axios.get('http://localhost:8000/generateslides');  // Change as needed
+        const thumbnails = response.data.thumbnails;
 
-    if (tabNames.length === 0) {
-        vscode.window.showInformationMessage('No open tabs to switch to.');
-        return;
-    }
-
-    // Show the QuickPick dialog for selecting a tab
-    const selectedTab = await vscode.window.showQuickPick(tabNames, {
-        placeHolder: 'Select a tab to switch to'
-    });
-
-    if (selectedTab) {
-        await switchToTab(selectedTab);
+        panel.webview.postMessage({ command: 'loadThumbnails', thumbnails });
+    } catch (error) {
+        vscode.window.showErrorMessage('Failed to load thumbnails from backend.');
     }
 }
 
-async function switchToTab(tabName: string) {
-    // Use tabGroups to get all open tabs, even those not currently visible
-    const allTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
+function getWebviewContent() {
+    return `
+        <!DOCTYPE html>
+        <html lang="en">
+        <body>
+            <h1>Code Presenter</h1>
+            <div id="thumbnails" style="display: flex; flex-wrap: wrap;"></div>
+            <button id="generateSlides">Generate Slides</button>
 
-    for (const tab of allTabs) {
-        const document = (tab.input as vscode.TextDocument).uri?.fsPath;
+            <script>
+                const vscode = acquireVsCodeApi();
 
-        // Check if the tab matches the selected tab name
-        if (document === tabName) {
-            // Open the document in the editor
-            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(document));
-            vscode.window.showInformationMessage(`Switched to tab: ${tabName}`);
-            return;
-        }
-    }
+                document.getElementById('generateSlides').onclick = () => {
+                    const tabContents = {}; // Replace with actual tab contents
+                    const windowSize = [800, 600]; // Example size
+                    const textSize = 14; // Example text size
 
-    vscode.window.showWarningMessage(`Tab not found: ${tabName}`);
+                    vscode.postMessage({ command: 'generateSlides', tabContents, windowSize, textSize });
+                };
+
+                // Listen for messages from the extension
+                window.addEventListener('message', event => {
+                    const message = event.data;
+
+                    if (message.command === 'loadThumbnails') {
+                        const thumbnailsDiv = document.getElementById('thumbnails');
+                        thumbnailsDiv.innerHTML = '';  // Clear existing content
+
+                        // Display thumbnails and make them clickable
+                        message.thumbnails.forEach(tab => {
+                            const img = document.createElement('img');
+                            img.src = tab.thumbnail; // Thumbnail image data
+                            img.alt = tab.name;
+                            img.style = 'width: 150px; height: 100px; margin: 10px; cursor: pointer;';
+                            img.onclick = () => switchToTab(tab.name);  // Click to switch tab
+
+                            thumbnailsDiv.appendChild(img);
+                        });
+                    }
+                });
+                
+                function switchToTab(tabName) {
+                    vscode.postMessage({ command: 'switchTab', tabName });
+                }
+            </script>
+        </body>
+        </html>
+    `;
 }
 
-
-// This method is called when your extension is deactivated
 export function deactivate() {}
