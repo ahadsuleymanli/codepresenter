@@ -22,11 +22,11 @@ export async function getOpenTabsContexts(): Promise<TabContext[]> {
 
         tabContexts.push({
             name: document.fileName,
-            full_code: CullFullTabContext ? "" : content,
+            full_code: content,
             code_sections: codeSections,
         });
     }
-    console.log(tabContexts);
+    // console.log(tabContexts);
     return tabContexts;
 }
 

@@ -92,7 +92,6 @@ function parseAIResponse(aiResponse: string): Slide[] {
     try {
         // Attempt to extract JSON from the AI response
         const jsonMatch = aiResponse.match(/\{[\s\S]*\}/); // Matches the first JSON-like structure in the response
-        console.log(aiResponse);
 
         if (!jsonMatch) {
             throw new Error('No JSON structure found in AI response.');
@@ -112,8 +111,6 @@ function parseAIResponse(aiResponse: string): Slide[] {
         if (!isValidResponse(parseObj)) {
             throw new Error('Invalid JSON structure in AI response.');
         }
-        console.log("-------");
-        console.log(parseObj);
 
         const response = parseObj as OpenAIResponseObj;
 
