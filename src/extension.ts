@@ -1,34 +1,51 @@
 import * as vscode from 'vscode';
-import axios from 'axios';
 
 // Azure OpenAI API Configuration
-const OPENAI_API_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
-const OPENAI_API_KEY = process.env.MY_ENV_VAR; 
-if (OPENAI_API_KEY) {
-	console.log(`Environment Variable: ${OPENAI_API_KEY}`);
-  } else {
-	console.error('Environment variable MY_ENV_VAR is not defined.');
-  }
+const OPENAI_API_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT ?? "";
+const AZURE_OPENAI_API_KEY = process.env.AZURE_OPENAI_API_KEY  ?? "";
+
+const MAX_SPLITVIEW_TABS = 2;
+
+
+if (!AZURE_OPENAI_API_KEY) {
+	console.error('Environment variable AZURE_OPENAI_API_KEY is not defined.');
+}
+if (!OPENAI_API_ENDPOINT) {
+	console.error('Environment variable OPENAI_API_ENDPOINT is not defined.');
+}
 
 interface TabContents {
     [key: string]: string;
 }
+
+// interface SlideRequest {
+//     tab_contents: TabContents;
+//     window_size: [number, number];
+//     text_size: number;
+//     lines_that_fit: number;
+//     prompt: string;
+// }
 
 interface Slide {
     tab_names: string[];
     tab_code_sections: [number, number][];
 }
 
-interface SlideRequest {
-    tab_contents: TabContents;
-    window_size: [number, number];
-    text_size: number;
-    lines_that_fit: number;
-    prompt: string;
+interface Response {
+    slides: Slide[];
 }
 
-interface SlideResponse {
-    slides: Slide[];
+interface OpenAIChoice {
+    message: {
+        role: string;
+        content: {
+            slides: Slide[];
+        };
+    };
+}
+
+interface OpenAIResponse {
+    choices: OpenAIChoice[];
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -51,7 +68,6 @@ export function activate(context: vscode.ExtensionContext) {
             }
         });
 
-        // Initial load of thumbnails when the webview is opened
         loadThumbnails(panel);
     });
 
@@ -61,33 +77,71 @@ export function activate(context: vscode.ExtensionContext) {
 async function generateSlides(tabContents: TabContents, windowSize: [number, number], textSize: number, panel: vscode.WebviewPanel) {
     const linesThatFit = Math.floor(windowSize[1] / textSize);  // Calculate lines that fit in the window
 
-    const requestBody: SlideRequest = {
-        tab_contents: tabContents,
-        window_size: windowSize,
-        text_size: textSize,
-        lines_that_fit: linesThatFit,
-        prompt: "Create a presentation based on the provided code."
+	const systemPrompt = `
+		Create a presentation based on the following:
+		- Relevant tabs: ${JSON.stringify(tabContents)}
+		- Max lines per window: ${linesThatFit}
+		- Select code sections and tabs to fit, using split view if needed, with up to ${MAX_SPLITVIEW_TABS} tabs per slide.
+		
+		The response model to return:
+
+		interface Slide {
+			tab_names: string[];
+			tab_code_sections: [number, number][];
+		}
+
+		interface Response {
+			slides: Slide[];
+		}
+	`;
+	const userPrompt = "Create a presentation based on the provided code.";
+
+	const requestBody = {
+        messages: [
+            {
+                role: 'system',
+                content: systemPrompt
+            },
+            {
+                role: 'user',
+                content: userPrompt
+            }
+        ],
+        temperature: 0.7,
+        top_p: 0.95,
+        max_tokens: 800
     };
 
-    const headers = {
-        "Content-Type": "application/json",
-        "api-key": OPENAI_API_KEY
-    };
 
-    try {
-        const response = await axios.post<SlideResponse>(OPENAI_API_ENDPOINT, requestBody, { headers });
-		console.log("response from openai:");
-		console.log(response);
-        // const slides = response.data.slides;
+	try {
+        // Send request to the OpenAI endpoint
+        const response = await fetch(OPENAI_API_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'api-key': AZURE_OPENAI_API_KEY
+            },
+            body: JSON.stringify(requestBody)
+        });
 
-        // // Handle the slides (e.g., display them in the webview)
-        // vscode.window.showInformationMessage(`Generated ${slides.length} slides.`);
+        // Parse response
+		const data = await response.json();
+		console.log(data);
+        vscode.window.showInformationMessage(`OpenAI response:\n ${JSON.stringify(data)}`);
 
-        // // Post slides back to the webview
-        // panel.webview.postMessage({ command: 'displaySlides', slides });
+        const openAIResponse = data as OpenAIResponse;
+        const slides = openAIResponse.choices[0]?.message?.content.slides || [];
+
+        vscode.window.showInformationMessage(`Generated ${slides.length} slides.`);
+
+
+		panel.webview.postMessage({
+            command: 'displaySlides',
+            slides
+        });
 
     } catch (error) {
-        vscode.window.showErrorMessage('Failed to generate slides.');
+        vscode.window.showErrorMessage('Failed to generate slides: ' + (error as Error)?.message ?? error);
     }
 }
 
