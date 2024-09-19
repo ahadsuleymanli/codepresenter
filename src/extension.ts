@@ -6,6 +6,8 @@ const AZURE_OPENAI_API_KEY = process.env.AZURE_OPENAI_API_KEY  ?? "";
 
 const MAX_SPLITVIEW_TABS = 2;
 
+const CullFullTabContext = true;
+
 if (!AZURE_OPENAI_API_KEY) {
     console.error('Environment variable AZURE_OPENAI_API_KEY is not defined.');
 }
@@ -22,10 +24,6 @@ interface TabContext {
 	name: string;
 	full_code?: string;
 	code_sections: CodeSection[];
-}
-
-interface TabContents {
-    [key: string]: string;
 }
 
 interface Slide {
@@ -65,7 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message.command === 'generateSlides') {
-                const tabContents = await getOpenTabsContents();  // Get the actual open tabs' content
+                const tabContents = await getOpenTabsContexts();  // Get the actual open tabs' content
                 await generateSlides(tabContents, message.windowSize, message.textSize, panel);
             }
         });
@@ -76,28 +74,28 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(disposable);
 }
 
-async function generateSlides(tabContents: TabContents, windowSize: [number, number], textSize: number, panel: vscode.WebviewPanel) {
+async function generateSlides(tabContexts: TabContext[], windowSize: [number, number], textSize: number, panel: vscode.WebviewPanel) {
     const linesThatFit = Math.floor(windowSize[1] / textSize);  // Calculate lines that fit in the window
 
     const systemPrompt = `
         Create a presentation based on the following:
-        - Relevant tabs: ${JSON.stringify(tabContents)}
+        - Relevant tabs: ${JSON.stringify(tabContexts)}
         - Max lines per window: ${linesThatFit}
-        - Select code sections for each tab you recommend for the presentation by creating a slide object, naming one or two tabs to show in split view and denote code sections by providing starting and endling line numbers on the code.
-		- Add if it would help any talking points slide_talking_points to each slide 
-        - Create as many or little slide objects as necessary to show off parts of code and in the order of your chosing
+        - Select code sections for each tab you recommend for the presentation by creating a slide object, naming one or two tabs to show in split view and denote code sections by providing starting and ending line numbers.
+        - Add if it would help any talking points slide_talking_points to each slide 
+        - Create as many or little slide objects as necessary to show off parts of code and in the order of your choosing
         
         The response model to return:
 
-		interface Slide {
-			tab_names: string[];
-			tab_code_sections: [number, number][];
-			slide_talking_points: string[]
-		}
+        interface Slide {
+            tab_names: string[];
+            tab_code_sections: [number, number][];
+            slide_talking_points: string[];
+        }
 
-		interface Response {
-			slides: Slide[];
-		}
+        interface Response {
+            slides: Slide[];
+        }
     `;
 
     const userPrompt = "Create a presentation based on the provided code.";
@@ -118,7 +116,6 @@ async function generateSlides(tabContents: TabContents, windowSize: [number, num
         max_tokens: 800
     };
 
-
     try {
         // Send request to the OpenAI endpoint
         const response = await fetch(OPENAI_API_ENDPOINT, {
@@ -136,10 +133,8 @@ async function generateSlides(tabContents: TabContents, windowSize: [number, num
         vscode.window.showInformationMessage(`OpenAI response:\n ${JSON.stringify(data)}`);
 
         const openAIResponse = data as OpenAIResponse;
-		const content = openAIResponse.choices[0]?.message?.content;
+        const content = openAIResponse.choices[0]?.message?.content;
         const slides = parseAIResponse(content) || [];
-		console.log("---- slides:");
-        console.log(slides);
 
         vscode.window.showInformationMessage(`Generated ${slides.length} slides.`);
 
@@ -215,10 +210,8 @@ function isValidSlide(slide: any): slide is Slide {
     );
 }
 
-
-// Function to collect the content of all open tabs
-async function getOpenTabsContents(): Promise<TabContents> {
-    const tabContents: TabContents = {};
+async function getOpenTabsContexts(): Promise<TabContext[]> {
+    const tabContexts: TabContext[] = [];
 
     // Loop through all open text documents in the workspace
     vscode.workspace.textDocuments.forEach(document => {
@@ -227,14 +220,64 @@ async function getOpenTabsContents(): Promise<TabContents> {
         if (document.uri.scheme === 'vscode-webview') {
             return;  // Skip webview tabs
         }
+
         const tabName = document.fileName;  // Get the file name of the tab
-        const content = document.getText();  // Get the content of the tab
-        tabContents[tabName] = content;  // Store the content in the tabContents object
+        const content = document.getText();  // Get the full content of the tab
+        const codeSections = extractCodeSections(content);  // Extract the code sections
+
+        // Push the tab context to the array
+        tabContexts.push({
+            name: tabName,
+            full_code: content,  // Optional, but you can include it
+            code_sections: codeSections,
+        });
     });
 
-	console.log(tabContents);
+    return tabContexts;
+}
 
-    return tabContents;
+function extractCodeSections(content: string): CodeSection[] {
+    const codeSections: CodeSection[] = [];
+    const lines = content.split('\n');
+
+    // Regular expression to capture function/method and class signatures.
+    // This can be enhanced to support different languages.
+    const signatureRegex = /^(?:\s*(?:class|function|def|public|private|protected|const)\s+([a-zA-Z0-9_]+))/;
+
+    let startLine = -1;
+    let currentSignature = '';
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Check if the line matches a function or class signature
+        const match = line.match(signatureRegex);
+        if (match) {
+            if (currentSignature && startLine !== -1) {
+                // If we were tracking a previous code block, close it
+                codeSections.push({
+                    section_signature: currentSignature,
+                    span: { start: startLine, end: i - 1 },
+                });
+            }
+
+            // Start tracking a new code block
+            currentSignature = match[0];  // Full matched signature
+            startLine = i;
+        }
+
+        // You can add logic here to include comments before or after the signature
+    }
+
+    // If there’s an ongoing code block, close it at the end
+    if (currentSignature && startLine !== -1) {
+        codeSections.push({
+            section_signature: currentSignature,
+            span: { start: startLine, end: lines.length - 1 },
+        });
+    }
+
+    return codeSections;
 }
 
 async function loadThumbnails(panel: vscode.WebviewPanel) {
