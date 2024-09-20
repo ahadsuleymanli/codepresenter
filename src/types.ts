@@ -15,6 +15,22 @@ export interface Slide {
 	slide_talking_points: string[]
 }
 
+export interface SlideDTO {
+    tab_names: string[];
+    tab_paths: string[];
+    tab_full_codes: string[];
+    tab_code_sections: [number, number][];
+	slide_talking_points: string[]
+}
+
+export interface ProcessedSlideDTO {
+    tab_names: string[];
+    tab_paths: string[];
+    code_snippets: string[];  // Pre-calculated code snippets to display
+    talking_points: string[]; // Pre-calculated talking points
+    starting_line: number;    // The starting line of the code snippet for navigation
+}
+
 export interface OpenAIResponseObj {
     slides: Slide[];
     ai_notes: string;

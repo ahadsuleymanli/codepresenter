@@ -1,6 +1,30 @@
 import * as vscode from 'vscode';
 import { Slide, TabContext } from './types';
 import { getOpenTabsContexts } from './openTabs';
+import { SlideDTO, ProcessedSlideDTO } from './types';
+
+export function processSlides(slides: SlideDTO[]): ProcessedSlideDTO[] {
+    return slides.map(slide => {
+        const codeSnippets: string[] = slide.tab_code_sections.map((section, index) => {
+            const fullCode = slide.tab_full_codes[index].split('\n');
+            const startLine = section[0];
+            const endLine = section[1];
+
+            // Get the snippet starting from section[0] and only include the first few lines
+            const snippetLines = fullCode.slice(startLine, endLine).slice(0, 3).join('\n'); // Limit to first 3 lines
+
+            return snippetLines || ''; // Return snippet or empty if no lines are available
+        });
+
+        return {
+            tab_names: slide.tab_names,
+            tab_paths: slide.tab_paths,
+            code_snippets: codeSnippets,  // Pre-calculated code snippets
+            talking_points: slide.slide_talking_points,
+            starting_line: slide.tab_code_sections[0][0], // Assuming we use the first section's starting line
+        };
+    });
+}
 
 export async function generateThumbnails(slides: Slide[]): Promise<{ name: string; image: string }[]> {
     // Retrieve tab contexts

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { TabContext, Slide, OpenAIResponse, OpenAIResponseObj } from './types';
+import { TabContext, Slide, SlideDTO, OpenAIResponse, OpenAIResponseObj } from './types';
+import { getOpenTabsContexts } from './openTabs';
 
 const OPENAI_API_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT ?? "";
 const AZURE_OPENAI_API_KEY = process.env.AZURE_OPENAI_API_KEY ?? "";
@@ -14,7 +15,7 @@ export async function generateSlides(
     windowSize: [number, number], 
     textSize: number, 
     panel: vscode.WebviewPanel
-) {
+): Promise<SlideDTO[]> {
     const linesThatFit = Math.floor(windowSize[1] / textSize);
 
     const systemPrompt = `
@@ -73,7 +74,8 @@ export async function generateSlides(
 
         // Create a map for full paths
         const tabContextsMap = new Map<string, string>();
-        tabContexts.forEach(context => {
+        const fullTabContents = await getOpenTabsContexts(false);
+        fullTabContents.forEach(context => {
             tabContextsMap.set(context.name, context.full_code ?? "");
         });
 
@@ -81,8 +83,8 @@ export async function generateSlides(
         const slidesWithFullPaths = slides.map(slide => {
             return {
                 ...slide,
-                tab_names: slide.tab_names.map(name => tabContextsMap.get(name) || name),
-                text: slide.slide_talking_points.join(', ') // Combine talking points into a single string
+                tab_paths: slide.tab_names.map(name => findFullPath(name, tabContextsMap)),
+                tab_full_codes: slide.tab_names.map(name => tabContextsMap.get(findFullPath(name, tabContextsMap)) || ''),
             };
         });
 
@@ -158,4 +160,9 @@ function findFullPath(shortName: string, tabContextsMap: Map<string, string>): s
         }
     }
     return shortName;
+}
+
+export function getShortPath(fullName: string): string {
+    // Get the last part of the path, which is typically the file name
+    return fullName.split('/').pop() || fullName;
 }
