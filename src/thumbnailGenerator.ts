@@ -20,12 +20,15 @@ export function processSlides(slides: SlideDTO[]): ProcessedSlideDTO[] {
             return snippetLines || ''; // Return snippet or empty if no lines are available
         });
 
+        // Collect starting lines for each tab section
+        const startingLines = slide.tab_code_sections.map(section => section[0]);
+
         return {
             tab_names: slide.tab_names,
             tab_paths: slide.tab_paths,
             code_snippets: codeSnippets,  // Pre-calculated code snippets
             talking_points: slide.slide_talking_points,
-            starting_line: slide.tab_code_sections[0][0], // Assuming we use the first section's starting line
+            starting_lines: startingLines, // Array of starting lines for each tab
         };
     });
 }

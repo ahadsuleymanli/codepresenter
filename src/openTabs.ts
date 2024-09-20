@@ -34,7 +34,7 @@ function extractCodeSections(content: string): CodeSection[] {
     const lines = content.split('\n');
 
     // Adjusted to match more signature types (classes, functions, etc.)
-    const signatureRegex = /^(?:\s*(?:class|function|def|public|private|protected|const)\s+([a-zA-Z0-9_]+))/;
+    const signatureRegex = /^(?:\s*(?:class|function|def|public|private|protected|const|export)\s+([a-zA-Z0-9_]+))/;
 
     let startLine = -1;
     let currentSignature = '';
