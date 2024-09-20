@@ -1,29 +1,33 @@
 import * as vscode from 'vscode';
 import { TabContext, Slide, OpenAIResponse, OpenAIResponseObj } from './types';
-import { generateThumbnails } from './thumbnailGenerator';
-
 
 const OPENAI_API_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT ?? "";
-const AZURE_OPENAI_API_KEY = process.env.AZURE_OPENAI_API_KEY  ?? "";
+const AZURE_OPENAI_API_KEY = process.env.AZURE_OPENAI_API_KEY ?? "";
 
 if (!AZURE_OPENAI_API_KEY || !OPENAI_API_ENDPOINT) {
     console.error('OpenAI API configuration missing.');
 }
 
-export async function generateSlides(tabContexts: TabContext[], userCustomPrompt: string, windowSize: [number, number], textSize: number, panel: vscode.WebviewPanel) {
+export async function generateSlides(
+    tabContexts: TabContext[], 
+    userCustomPrompt: string, 
+    windowSize: [number, number], 
+    textSize: number, 
+    panel: vscode.WebviewPanel
+) {
     const linesThatFit = Math.floor(windowSize[1] / textSize);
 
     const systemPrompt = `
         Create a presentation based on the json object in the user Prompt by following these instructions:
-        - Select code sections for each tab you recommend for the presentation by creating a slide object, naming one or two tabs to show in split view and denote code sections by providing starting and endling line numbers on the code. 
-        - Create as many or little slide objects as necessary to show off parts of code and in the order of your chosing
+        - Select code sections for each tab you recommend for the presentation by creating a slide object, naming one or two tabs to show in split view and denote code sections by providing starting and ending line numbers on the code. 
+        - Create as many or little slide objects as necessary to show off parts of code and in the order of your choosing
         - Add if it would help any talking points slide_talking_points to each slide.
         - Return only a Json Object with the structure of OpenAIResponseObj specified below, only add ai_notes if you feel an additional text response from you is warranted.
 
         export interface Slide {
             tab_names: string[];
             tab_code_sections: [number, number][];
-            slide_talking_points: string[]
+            slide_talking_points: string[];
         }
 
         export interface OpenAIResponseObj {
@@ -32,7 +36,7 @@ export async function generateSlides(tabContexts: TabContext[], userCustomPrompt
         }
     `;
 
-    const userPrompt = `User's custom prompt: ${userCustomPrompt}
+    const userPromptContent = `User's custom prompt: ${userCustomPrompt}
     Max lines per window: ${linesThatFit}
     tabContexts:${JSON.stringify(tabContexts)}
     `;
@@ -45,7 +49,7 @@ export async function generateSlides(tabContexts: TabContext[], userCustomPrompt
             },
             {
                 role: 'user',
-                content: userPrompt
+                content: userPromptContent
             }
         ],
         temperature: 0.7,
@@ -67,68 +71,64 @@ export async function generateSlides(tabContexts: TabContext[], userCustomPrompt
         const openAIResponse = data as OpenAIResponse;
         const slides = parseAIResponse(openAIResponse.choices[0]?.message?.content || '');
 
-        vscode.window.showInformationMessage(`Generated ${slides.length} slides.`);
-
-        const thumbnails = await generateThumbnails(slides);
-
-        // Send thumbnails to the panel
-        panel.webview.postMessage({ command: 'loadThumbnails', thumbnails });
-
-        panel.webview.postMessage({
-            command: 'displaySlides',
-            slides
+        // Create a map for full paths
+        const tabContextsMap = new Map<string, string>();
+        tabContexts.forEach(context => {
+            tabContextsMap.set(context.name, context.full_code ?? "");
         });
+
+        // Replace slide names with full paths
+        const slidesWithFullPaths = slides.map(slide => {
+            return {
+                ...slide,
+                tab_names: slide.tab_names.map(name => tabContextsMap.get(name) || name),
+                text: slide.slide_talking_points.join(', ') // Combine talking points into a single string
+            };
+        });
+
+        vscode.window.showInformationMessage(`Generated ${slidesWithFullPaths.length} slides.`);
+
+        return slidesWithFullPaths; // Ensure the slides are returned
 
     } catch (error) {
         if (error instanceof Error) {
             vscode.window.showErrorMessage('Failed to generate slides: ' + error.message);
         } else {
-            vscode.window.showErrorMessage('Failed to generate slides:  due to an unknown error.');
+            vscode.window.showErrorMessage('Failed to generate slides: due to an unknown error.');
         }
+        return []; // Return an empty array in case of error
     }
 }
 
 function parseAIResponse(aiResponse: string): Slide[] {
     try {
-        // Attempt to extract JSON from the AI response
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/); // Matches the first JSON-like structure in the response
-
+        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
             throw new Error('No JSON structure found in AI response.');
         }
 
         const jsonResponse = jsonMatch[0];
-
-        // Attempt to parse the JSON
         let parseObj: any;
+
         try {
             parseObj = JSON.parse(jsonResponse);
         } catch (e) {
             throw new Error('Failed to parse JSON from AI response.');
         }
 
-        // Validate the structure against the Response interface
         if (!isValidResponse(parseObj)) {
             throw new Error('Invalid JSON structure in AI response.');
         }
 
-        const response = parseObj as OpenAIResponseObj;
-
-        // Return the slides array
-        return response.slides;
+        return parseObj.slides;
     } catch (error) {
         if (error instanceof Error) {
             vscode.window.showErrorMessage('Failed to parse AI response: ' + error.message);
-        } else {
-            vscode.window.showErrorMessage('Failed to parse AI response due to an unknown error.');
         }
-
-        // In case of error, return an empty array as fallback
         return [];
     }
 }
 
-// Type guard to check if the parsed object matches the Response interface
 function isValidResponse(response: any): response is OpenAIResponseObj {
     return (
         Array.isArray(response.slides) && 
@@ -136,7 +136,6 @@ function isValidResponse(response: any): response is OpenAIResponseObj {
     );
 }
 
-// Type guard to check if each slide matches the Slide interface
 function isValidSlide(slide: any): slide is Slide {
     return (
         Array.isArray(slide.tab_names) &&
@@ -150,4 +149,13 @@ function isValidSlide(slide: any): slide is Slide {
                 typeof section[1] === 'number'
         )
     );
+}
+
+function findFullPath(shortName: string, tabContextsMap: Map<string, string>): string {
+    for (const [fullName, _] of tabContextsMap) {
+        if (fullName.endsWith(shortName)) {
+            return fullName;
+        }
+    }
+    return shortName;
 }

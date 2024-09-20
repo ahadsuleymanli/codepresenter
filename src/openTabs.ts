@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import { TabContext, CodeSection } from './types';
 
-const CullFullTabContext = true;
 
-export async function getOpenTabsContexts(): Promise<TabContext[]> {
+export async function getOpenTabsContexts(cullFullTabContext: boolean): Promise<TabContext[]> {
     const tabContexts: TabContext[] = [];
 
     // Get all tabs from the current window (includes all tabs even if not active)
@@ -22,7 +21,7 @@ export async function getOpenTabsContexts(): Promise<TabContext[]> {
 
         tabContexts.push({
             name: document.fileName,
-            full_code: content,
+            full_code: cullFullTabContext ? "" : content,
             code_sections: codeSections,
         });
     }
