@@ -38,14 +38,27 @@ export function activate(context: vscode.ExtensionContext) {
             if (message.command === 'switchTab') {
                 const tabPaths: string[] = message.tabPaths.split('-');  // Use tab_paths for file paths
 
+                // Get the currently active editor
+                const activeEditor = vscode.window.activeTextEditor;
+                let columnToOpenIn: vscode.ViewColumn;
+
+                // Determine which column to open the first document in
+                if (activeEditor) {
+                    columnToOpenIn = activeEditor.viewColumn ? activeEditor.viewColumn : vscode.ViewColumn.One; // Use the active editor's column or default to one
+                } else {
+                    columnToOpenIn = vscode.ViewColumn.One; // No active editor, open in the first column
+                }
+
                 const documents = await Promise.all(tabPaths.map(path => {
                     return vscode.workspace.openTextDocument(vscode.Uri.file(path));
                 }));
 
-                await vscode.window.showTextDocument(documents[0], { preview: false });
+                // Open the first document in the determined column
+                await vscode.window.showTextDocument(documents[0], { preview: false, viewColumn: columnToOpenIn });
 
+                // Open the second document in the next column
                 if (documents.length > 1) {
-                    await vscode.window.showTextDocument(documents[1], vscode.ViewColumn.Beside);
+                    await vscode.window.showTextDocument(documents[1], { preview: false, viewColumn: columnToOpenIn + 1 });
                 }
 
                 // Scroll to the specified starting line
