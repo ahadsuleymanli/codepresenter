@@ -6,12 +6,16 @@ import { SlideDTO, ProcessedSlideDTO } from './types';
 export function processSlides(slides: SlideDTO[]): ProcessedSlideDTO[] {
     return slides.map(slide => {
         const codeSnippets: string[] = slide.tab_code_sections.map((section, index) => {
-            const fullCode = slide.tab_full_codes[index].split('\n');
+            const fullCode = slide.tab_full_codes[index]?.split('\n') ?? [];
             const startLine = section[0];
             const endLine = section[1];
 
-            // Get the snippet starting from section[0] and only include the first few lines
-            const snippetLines = fullCode.slice(startLine, endLine).slice(0, 3).join('\n'); // Limit to first 3 lines
+            // Filter out empty lines and slice the lines from startLine to endLine
+            const snippetLines = fullCode
+                .slice(startLine, endLine)
+                .filter(line => line.trim() !== '') // Ignore empty lines
+                .slice(0, 3)  // Limit to first 3 non-empty lines
+                .join('\n'); 
 
             return snippetLines || ''; // Return snippet or empty if no lines are available
         });
@@ -25,6 +29,7 @@ export function processSlides(slides: SlideDTO[]): ProcessedSlideDTO[] {
         };
     });
 }
+
 
 export async function generateThumbnails(slides: Slide[]): Promise<{ name: string; image: string }[]> {
     // Retrieve tab contexts
