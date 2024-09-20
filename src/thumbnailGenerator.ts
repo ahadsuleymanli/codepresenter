@@ -21,7 +21,7 @@ export function processSlides(slides: SlideDTO[]): ProcessedSlideDTO[] {
         });
 
         // Collect starting lines for each tab section
-        const startingLines = slide.tab_code_sections.map(section => section[0]);
+        const startingLines = slide.tab_code_sections.map(section => section[0] + 1);
 
         return {
             tab_names: slide.tab_names,

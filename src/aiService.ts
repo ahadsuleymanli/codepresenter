@@ -24,6 +24,8 @@ export async function generateSlides(
         - Create as many or little slide objects as necessary to show off parts of code and in the order of your choosing
         - Add if it would help any talking points slide_talking_points to each slide.
         - Return only a Json Object with the structure of OpenAIResponseObj specified below, only add ai_notes if you feel an additional text response from you is warranted.
+        - tab_code_sections should be [number, number] pairs denoting start and end sections of the code to show, two pairs at most if the slide should have two tabs side by side
+        - to show multiple code sections from the same tab, create separate slides with the tab_name and code_section
 
         export interface Slide {
             tab_names: string[];
@@ -68,10 +70,10 @@ export async function generateSlides(
             body: JSON.stringify(requestBody)
         });
 
-        const data = await response.json();
-        const openAIResponse = data as OpenAIResponse;
-        const slides = parseAIResponse(openAIResponse.choices[0]?.message?.content || '');
+        const openAIResponse = await response.json() as OpenAIResponse;
+        console.log(openAIResponse);
 
+        const slides = parseAIResponse(openAIResponse.choices[0]?.message?.content || '');
         // Create a map for full paths
         const tabContextsMap = new Map<string, string>();
         const fullTabContents = await getOpenTabsContexts(false);

@@ -28,6 +28,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const slides: SlideDTO[] = await generateSlides(tabContents, userCustomPrompt, message.windowSize, message.textSize, panel);
                 const processedSlides = processSlides(slides);
                 panel.webview.postMessage({ command: 'displaySlides', slides: processedSlides });
+				console.log(slides);
             }
 
 			if (message.command === 'switchTab') {
@@ -41,13 +42,13 @@ export function activate(context: vscode.ExtensionContext) {
 				// Open the first document in ViewColumn.One and scroll to its starting line
 				const editor1 = await vscode.window.showTextDocument(documents[0], { preview: false, viewColumn: vscode.ViewColumn.One });
 				const startingLine1 = startingLines[0];
-				editor1.revealRange(new vscode.Range(startingLine1, 0, startingLine1, 0));
+				editor1.revealRange(new vscode.Range(startingLine1, 0, startingLine1, 0), vscode.TextEditorRevealType.AtTop);
 			
 				// Open the second document in ViewColumn.Two (if it exists) and scroll to its starting line
 				if (documents.length > 1) {
 					const editor2 = await vscode.window.showTextDocument(documents[1], { preview: false, viewColumn: vscode.ViewColumn.Two });
 					const startingLine2 = startingLines[1];
-					editor2.revealRange(new vscode.Range(startingLine2, 0, startingLine2, 0));
+					editor2.revealRange(new vscode.Range(startingLine2, 0, startingLine2, 0), vscode.TextEditorRevealType.AtTop);
 			
 					// Move CodePresenter to ViewColumn.Three and pin it
 					await panel.reveal(vscode.ViewColumn.Three);
